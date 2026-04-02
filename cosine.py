@@ -21,7 +21,7 @@ def compute_edges_batch(batch_indices, features, threshold):
             sim = sims[i, j]
             cos_dist = 1 - sim
             if cos_dist <= threshold:
-                edges.append((src, j, sim))
+                edges.append((src, j, sim)) 
 
     return edges
 
@@ -32,11 +32,24 @@ def main(args):
 
     graph_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:]) / "graphs"
     existing_graphs = list(graph_dir.glob(f"cosine_t{args.threshold}_*.pkl"))
+    existing_edges = list(graph_dir.glob(f"cosine_t{args.threshold}_*_edges.npz"))
 
     if existing_graphs:
         print(f"Graph already exists at {existing_graphs[0]}, skipping computation.")
         graph = ig.Graph.Read_Pickle(existing_graphs[0])
         graph_time = float(existing_graphs[0].stem.split("_")[-1])
+    elif existing_edges:
+        print(f"Edges already exist at {existing_edges[0]}, loading and constructing graph.")
+        data = np.load(existing_edges[0], allow_pickle=True)
+        edges = data["edges"]
+        src = edges[:, 0].astype(np.int32)
+        dst = edges[:, 1].astype(np.int32)
+        weights = edges[:, 2].astype(np.float32)
+        graph = ig.Graph()
+        graph.add_vertices(len(features))
+        graph.add_edges([(src, dst) for src, dst in zip(src, dst)])
+        graph.es["weight"] = [weight for weight in weights]
+        graph_time = float(existing_edges[0].stem.split("_")[-2])
     else:
         start_time = time.time()
         graph_dir.mkdir(parents=True, exist_ok=True)
@@ -48,14 +61,20 @@ def main(args):
             delayed(compute_edges_batch)(batch, features, args.threshold)                
             for batch in tqdm(list(batch_indices(len(features), batch_size=1_000)), desc="Computing edges")
         )
-        
+        del features
         edges = [edge for batch in batch_edges for edge in batch]
+        del batch_edges
         graph.add_edges([(src, dst) for src, dst, _ in edges])
         graph.es["weight"] = [weight for _, _, weight in edges]
         graph_time = time.time() - start_time
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
-        graph_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}.pkl"
-        graph.write_pickle(graph_path)
+        if len(edges) > 10_000_000:
+            print(f"Warning: Graph has {len(edges):,} edges, which may lead to high memory usage.")
+            edges_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}_edges.npz"
+            np.savez_compressed(edges_path, edges=edges)
+        else:
+            graph_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}.pkl"
+            graph.write_pickle(graph_path)
     
     start_time = time.time()
     partition, resolution = partition_graph(graph, num_clusters=args.num_clusters, resolution=args.resolution, max_iterations=args.max_iter, tolerance=args.tolerance)
