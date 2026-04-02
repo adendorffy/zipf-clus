@@ -8,12 +8,13 @@ from utils import seconds_to_frames
 class Quantiser:
     def __init__(self, train_features_dir, feature_dir, boundary_dir, k, batch_size=1_000, total_hours=50, collapsed=False):
         self.train_features_dir = train_features_dir
+        self.feature_dir = feature_dir
         self.boundary_dir = boundary_dir
         self.k = k
         self.batch_size = batch_size
         self.total_hours = total_hours
         self.collapsed = collapsed
-        self.output_dir = self.set_output_dir(feature_dir)
+        self.output_dir = self.set_output_dir()
     
     def set_output_dir(self):
 
@@ -24,6 +25,7 @@ class Quantiser:
             output_dir = Path("discrete_features_collapsed") / output_dir / "/".join(self.boundary_dir.parts[-2:])
 
         print(f"Setting output directory to: {output_dir}")
+        output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
 
     def collapse_segment(self, segment_labels):
@@ -39,6 +41,7 @@ class Quantiser:
         
         feature_files = sorted(self.train_features_dir.rglob("*.npy"))
         total_frames = int(self.total_hours * 3600 * 50)
+        print(f"Fitting KMeans with {total_frames:,}")
         
         curr_frames = 0
         all_features = []
@@ -48,11 +51,16 @@ class Quantiser:
             curr_frames += features.shape[0]
             if curr_frames >= total_frames:
                 break
-        
+
+        print(f"Loaded {curr_frames:,} frames for KMeans fitting.")
+
         all_features = np.vstack(all_features)
         print(f"Fitting MiniBatchKMeans with {self.k} clusters on {all_features.shape[0]} samples...")
         self.kmeans = MiniBatchKMeans(n_clusters=self.k, batch_size=self.batch_size, random_state=42)
         self.kmeans.fit(all_features)
+        kmeans_path = self.output_dir / f"kmeans_k{self.k}.joblib"
+        joblib.dump(self.kmeans, kmeans_path)
+        print(f"KMeans model saved to {kmeans_path}")
     
     def transform(self):
 
@@ -91,6 +99,7 @@ class Quantiser:
 
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     np.save(out_path, quantised_segment)
+                    start = end
 
 def load_quantised_segments(feature_dir):
     

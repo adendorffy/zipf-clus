@@ -1,4 +1,4 @@
 __pycache__/
-pooled_features/
+*_features/
 **/*/*.pkl
 **/*/*.npy

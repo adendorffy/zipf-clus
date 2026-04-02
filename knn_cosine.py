@@ -3,25 +3,33 @@ from pathlib import Path
 import igraph as ig
 from tqdm import tqdm
 import numpy as np
-from joblib import Parallel, delayed
 import time
+import faiss
 from pooling import load_pooled_features
-from utils import batch_indices, partition_graph, write_partition_to_file   
+from utils import partition_graph, write_partition_to_file   
 
 
-def compute_edges_batch(batch_indices, features, threshold):
+def compute_edges(features, k, threshold):
     
-    batch_feat = features[batch_indices]
-    sims = (batch_feat @ features.T).astype(np.float32)
+    dim = features.shape[1]
+    index = faiss.IndexHNSWFlat(dim, 32, faiss.METRIC_INNER_PRODUCT)
 
-    edges = []
-    for i in range(len(batch_indices)):
-        src = batch_indices[i]
-        for j in range(src + 1, len(features)):
-            sim = sims[i, j]
-            cos_dist = 1 - sim
-            if cos_dist <= threshold:
-                edges.append((src, j, sim))
+    index.add(features)
+    Sim, I = index.search(features, k + 1)
+
+    I = I[:, 1:]
+    Sim = Sim[:, 1:]
+
+    sources = np.repeat(np.arange(len(features)), k)
+    targets = I.ravel()
+    weights = Sim.ravel()
+
+    valid_mask = (targets != -1) & (weights >= threshold)
+    sources = sources[valid_mask]
+    targets = targets[valid_mask]
+    weights = weights[valid_mask] 
+
+    edges = list(zip(sources, targets, weights))
 
     return edges
 
@@ -31,7 +39,7 @@ def main(args):
     features, filenames, intervals = load_pooled_features(args.feature_dir)
 
     graph_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:]) / "graphs"
-    existing_graphs = list(graph_dir.glob(f"cosine_t{args.threshold}_*.pkl"))
+    existing_graphs = list(graph_dir.glob(f"knn_cosine_k{args.k}_t{args.threshold}_*.pkl"))
 
     if existing_graphs:
         print(f"Graph already exists at {existing_graphs[0]}, skipping computation.")
@@ -44,17 +52,13 @@ def main(args):
         graph = ig.Graph()
         graph.add_vertices(len(features))
 
-        batch_edges = Parallel(n_jobs=-1)(
-            delayed(compute_edges_batch)(batch, features, args.threshold)                
-            for batch in tqdm(list(batch_indices(len(features), batch_size=1_000)), desc="Computing edges")
-        )
-        
-        edges = [edge for batch in batch_edges for edge in batch]
+        edges = compute_edges(features, args.k, args.threshold)
+
         graph.add_edges([(src, dst) for src, dst, _ in edges])
         graph.es["weight"] = [weight for _, _, weight in edges]
         graph_time = time.time() - start_time
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
-        graph_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}.pkl"
+        graph_path = graph_dir / f"knn_cosine_k{args.k}_t{args.threshold}_{graph_time:.2f}.pkl"
         graph.write_pickle(graph_path)
     
     start_time = time.time()
@@ -64,7 +68,7 @@ def main(args):
     
     total_time = graph_time + partition_time
     print(f"Total time (graph construction + partitioning): {total_time:.2f} seconds.")
-    partition_path = graph_dir.parent / f"cosine_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}.txt"
+    partition_path = graph_dir.parent / f"knn_cosine_k{args.k}_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")
 
@@ -75,6 +79,7 @@ if __name__ == "__main__":
     parser.add_argument("feature_dir", type=Path,  help="Directory containing feature .npy files")
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
     parser.add_argument("num_clusters", type=int, help="Number of clusters for Leiden algorithm")
+    parser.add_argument("k", type=int, help="Number of nearest neighbors for graph construction")
     parser.add_argument("--pca_components", type=int, default=350, help="Number of PCA components to retain")
     parser.add_argument("--threshold", type=float, default=0.5, help="Cosine distance threshold for edge creation")
     parser.add_argument("--resolution", type=float, default=0.5, help="Resolution parameter for Leiden algorithm")

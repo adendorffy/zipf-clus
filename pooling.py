@@ -118,6 +118,7 @@ class Pooling:
 
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     np.save(out_path, pooled_feature)
+                    start = end
 
 def load_pooled_features(feature_dir):
 
@@ -136,7 +137,7 @@ def load_pooled_features(feature_dir):
         intervals.append((start_frame, end_frame))
 
     features = np.asarray(features, dtype=np.float32)
-    features = normalize(features, axis=1, norm="l2").astype(np.float32)
+    # features = normalize(features, axis=1, norm="l2").astype(np.float32)
     features = features - np.mean(features, axis=0)
     features = features / (np.linalg.norm(features, axis=1, keepdims=True) + 1e-10)
 
