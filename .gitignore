@@ -2,3 +2,4 @@ __pycache__/
 *_features/
 **/*/*.pkl
 **/*/*.npy
+**/*/*.npz
