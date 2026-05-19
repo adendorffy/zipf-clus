@@ -1,0 +1,1 @@
+python average.py "pooled_features/zerospeech/french_subset/wavlm_large/layer_21/gt/syllables" "outputs_with_peak" 4473

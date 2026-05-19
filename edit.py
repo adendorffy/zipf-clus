@@ -9,6 +9,7 @@ import editdistance
 from datasketch import MinHash, MinHashLSH
 from quantise import load_quantised_segments
 from utils import batch_indices, partition_graph, write_partition_to_file   
+import tracemalloc
 
 
 def compute_edges_batch(batch, features, lengths, threshold):
@@ -23,6 +24,8 @@ def compute_edges_batch(batch, features, lengths, threshold):
         for j in range(i + 1, n):
             lj = lengths[j]
             max_len = li if li >= lj else lj
+            if max_len == 0:
+                continue
 
             if abs(li - lj) / max_len > threshold:
                 continue
@@ -77,7 +80,8 @@ def compute_edges_lsh_minhash(features, lengths, threshold):
 
 
 def main(args):
-
+    tracemalloc.start()
+    
     features, filenames, intervals = load_quantised_segments(args.feature_dir)
     lengths = np.array([len(f) for f in features], dtype=np.int32)
 
@@ -90,7 +94,8 @@ def main(args):
     if existing_graphs:
         print(f"Graph already exists at {existing_graphs[0]}, skipping computation.")
         graph = ig.Graph.Read_Pickle(existing_graphs[0])
-        graph_time = float(existing_graphs[0].stem.split("_")[-1])
+        graph_time = float(existing_graphs[0].stem.split("_")[-2])
+        graph_peak = float(existing_graphs[0].stem.split("_")[-1])
     else:
         start_time = time.time()
         graph_dir.mkdir(parents=True, exist_ok=True)
@@ -119,11 +124,13 @@ def main(args):
         graph.add_edges([(src, dst) for src, dst, _ in edges])
         graph.es["weight"] = [weight for _, _, weight in edges]
         graph_time = time.time() - start_time
+        current, graph_peak = tracemalloc.get_traced_memory()
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
+        print(f"Peak memory usage: {graph_peak / 10**6:.2f} MB")
         if args.use_lsh:
-            graph_path = graph_dir / f"edit_t{args.threshold}_lsh_{graph_time:.2f}.pkl"
+            graph_path = graph_dir / f"edit_t{args.threshold}_lsh_{graph_time:.2f}_{graph_peak / 10**6:.2f}.pkl"
         else:
-            graph_path = graph_dir / f"edit_t{args.threshold}_{graph_time:.2f}.pkl"
+            graph_path = graph_dir / f"edit_t{args.threshold}_{graph_time:.2f}_{graph_peak / 10**6:.2f}.pkl"
         graph.write_pickle(graph_path)
         print(f"Graph saved to {graph_path}")
     
@@ -133,11 +140,16 @@ def main(args):
     print(f"Leiden partitioning completed in {partition_time:.2f} seconds.")
     
     total_time = graph_time + partition_time
+    current, peak = tracemalloc.get_traced_memory()
+    if graph_peak > peak:
+        peak = graph_peak
+
     print(f"Total time (graph construction + partitioning): {total_time:.2f} seconds.")
+    print(f"Peak memory usage: {peak / 10**6:.2f} MB")
     if args.use_lsh:
-        partition_path = graph_dir.parent / f"edit_t{args.threshold}_lsh_r{args.resolution:.4f}_{total_time:.2f}.txt"
+        partition_path = graph_dir.parent / f"edit_t{args.threshold}_lsh_r{resolution:.4f}_{total_time:.2f}_{peak / 10**6:.2f}.txt"
     else:
-        partition_path = graph_dir.parent / f"edit_t{args.threshold}_r{args.resolution:.4f}_{total_time:.2f}.txt"
+        partition_path = graph_dir.parent / f"edit_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}_{peak / 10**6:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")
 

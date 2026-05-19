@@ -39,6 +39,11 @@ class Quantiser:
     
     def fit(self):
         
+        kmeans_path = self.output_dir / f"kmeans_k{self.k}.joblib"
+        if kmeans_path.exists():
+            print(f"KMeans model already exists at {kmeans_path}, loading model.")
+            self.kmeans = joblib.load(kmeans_path)
+            return
         feature_files = sorted(self.train_features_dir.rglob("*.npy"))
         total_frames = int(self.total_hours * 3600 * 50)
         print(f"Fitting KMeans with {total_frames:,}")
@@ -58,7 +63,7 @@ class Quantiser:
         print(f"Fitting MiniBatchKMeans with {self.k} clusters on {all_features.shape[0]} samples...")
         self.kmeans = MiniBatchKMeans(n_clusters=self.k, batch_size=self.batch_size, random_state=42)
         self.kmeans.fit(all_features)
-        kmeans_path = self.output_dir / f"kmeans_k{self.k}.joblib"
+        
         joblib.dump(self.kmeans, kmeans_path)
         print(f"KMeans model saved to {kmeans_path}")
     
@@ -72,6 +77,13 @@ class Quantiser:
 
         for feature_file in tqdm(feature_files, desc="Transforming features"):
             features = np.load(feature_file)
+            if features.ndim == 1:
+                features = features.reshape(-1, 1)
+                print(f"Warning: Loaded features from {feature_file.stem} have 1 dimension, reshaping to {features.shape}")
+
+            if features.shape[1] != self.kmeans.n_features_in_:
+                print(f"Error: Feature dimension {features.shape[1]} does not match KMeans expected dimension {self.kmeans.n_features_in_} for file {feature_file.stem}")
+                continue
             quantised = self.kmeans.predict(features)
             
             segment_name = feature_file.stem

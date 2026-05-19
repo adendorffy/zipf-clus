@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from joblib import Parallel, delayed
 import time
+import tracemalloc
 from pooling import load_pooled_features
 from utils import batch_indices, partition_graph, write_partition_to_file   
 
@@ -28,6 +29,7 @@ def compute_edges_batch(batch_indices, features, threshold):
 
 def main(args):
 
+    tracemalloc.start()
     features, filenames, intervals = load_pooled_features(args.feature_dir)
 
     graph_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:]) / "graphs"
@@ -37,7 +39,9 @@ def main(args):
     if existing_graphs:
         print(f"Graph already exists at {existing_graphs[0]}, skipping computation.")
         graph = ig.Graph.Read_Pickle(existing_graphs[0])
-        graph_time = float(existing_graphs[0].stem.split("_")[-1])
+        graph_time = float(existing_graphs[0].stem.split("_")[-2])
+        graph_peak = float(existing_graphs[0].stem.split("_")[-1])
+
     elif existing_edges:
         print(f"Edges already exist at {existing_edges[0]}, loading and constructing graph.")
         data = np.load(existing_edges[0], allow_pickle=True)
@@ -49,9 +53,11 @@ def main(args):
         graph.add_vertices(len(features))
         graph.add_edges([(src, dst) for src, dst in zip(src, dst)])
         graph.es["weight"] = [weight for weight in weights]
-        graph_time = float(existing_edges[0].stem.split("_")[-2])
+        graph_time = float(existing_edges[0].stem.split("_")[-3])
+        graph_peak = float(existing_edges[0].stem.split("_")[-2])
     else:
         start_time = time.time()
+        tracemalloc.reset_peak()
         graph_dir.mkdir(parents=True, exist_ok=True)
         print(f"Saving graph to {graph_dir}")
         graph = ig.Graph()
@@ -67,23 +73,30 @@ def main(args):
         graph.add_edges([(src, dst) for src, dst, _ in edges])
         graph.es["weight"] = [weight for _, _, weight in edges]
         graph_time = time.time() - start_time
+        current, graph_peak = tracemalloc.get_traced_memory()
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
+        print(f"Peak memory usage: {graph_peak / 10**6:.2f} MB")
         if len(edges) > 10_000_000:
             print(f"Warning: Graph has {len(edges):,} edges, which may lead to high memory usage.")
-            edges_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}_edges.npz"
+            edges_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}_{graph_peak / 10**6:.2f}_edges.npz"
             np.savez_compressed(edges_path, edges=edges)
         else:
-            graph_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}.pkl"
+            graph_path = graph_dir / f"cosine_t{args.threshold}_{graph_time:.2f}_{graph_peak / 10**6:.2f}.pkl"
             graph.write_pickle(graph_path)
     
     start_time = time.time()
     partition, resolution = partition_graph(graph, num_clusters=args.num_clusters, resolution=args.resolution, max_iterations=args.max_iter, tolerance=args.tolerance)
     partition_time = time.time() - start_time
     print(f"Leiden partitioning completed in {partition_time:.2f} seconds.")
-    
+    current, peak = tracemalloc.get_traced_memory()
+    if graph_peak > peak:
+        peak = graph_peak
+
     total_time = graph_time + partition_time
     print(f"Total time (graph construction + partitioning): {total_time:.2f} seconds.")
-    partition_path = graph_dir.parent / f"cosine_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}.txt"
+    print(f"Peak memory usage: {peak / 10**6:.2f} MB")
+
+    partition_path = graph_dir.parent / f"cosine_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}_{peak / 10**6:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")
 

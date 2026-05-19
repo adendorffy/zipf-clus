@@ -2,8 +2,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import IncrementalPCA
-from sklearn.preprocessing import normalize
+from sklearn.decomposition import IncrementalPCA, PCA
 from utils import seconds_to_frames
 
 class Pooling:
@@ -27,7 +26,6 @@ class Pooling:
         return output_dir
     
     def fit(self):
-        
         if self.scaler_path.exists() and self.pca_path.exists():
             print("Loading existing scaler and PCA models...")
             self.scaler_model = np.load(self.scaler_path, allow_pickle=True).item()
@@ -39,17 +37,27 @@ class Pooling:
             print(f"Warning: Found {len(feature_files)} feature files. Using fit_batched() to avoid memory issues.")
             self.fit_batched()
             return
-        
+
         print("Fitting scaler and PCA on all features at once...")
+
         features = [np.load(f) for f in tqdm(feature_files, desc="Loading features")]
         features = np.vstack(features)
-        self.scaler_model = StandardScaler()
-        self.scaler_model.fit(features)
-        np.save(self.scaler_path, self.scaler_model)
 
-        self.pca_model = IncrementalPCA(n_components=self.pca_components)
-        self.pca_model.fit(features)
-        np.save(self.pca_path, self.pca_model)
+        if not self.scaler_path.exists():
+            self.scaler_model = StandardScaler()
+            self.scaler_model.fit(features)
+            np.save(self.scaler_path, self.scaler_model)
+        else:
+            self.scaler_model = np.load(self.scaler_path, allow_pickle=True).item()
+
+        scaled_features = self.scaler_model.transform(features)
+
+        if not self.pca_path.exists():
+            self.pca_model = PCA(n_components=self.pca_components)
+            self.pca_model.fit(scaled_features)
+            np.save(self.pca_path, self.pca_model)
+        else:
+            self.pca_model = np.load(self.pca_path, allow_pickle=True).item()
 
     def fit_batched(self, batch_size=10_000):
         
@@ -90,6 +98,10 @@ class Pooling:
         
         for feature_file in tqdm(feature_files, desc="Transforming features"):
             features = np.load(feature_file)
+            if features.size == 0: continue
+            if features.ndim == 1:
+                features = features.reshape(1, -1)
+                
             scaled_features = self.scaler_model.transform(features)
             pca_features = self.pca_model.transform(scaled_features)
         
@@ -113,6 +125,8 @@ class Pooling:
                     if end == start: continue
 
                     segment = pca_features[start:end]
+                    if segment.size == 0: continue
+
                     pooled_segment = np.mean(segment, axis=0)
                     pooled_feature = np.asarray(pooled_segment, dtype=np.float32)       
 
