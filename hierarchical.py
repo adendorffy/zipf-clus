@@ -31,16 +31,19 @@ def main(args):
     start_time = time.time()
     tracemalloc.reset_peak()
     print("Running hierarchical clustering with sklearn")
-
-    birch_model = Birch(n_clusters=args.num_clusters)
-    labels = birch_model.fit_predict(features)
+    if args.algorithm == "agglomerative":
+        agg_model = AgglomerativeClustering(n_clusters=args.num_clusters, affinity='euclidean', linkage='ward')
+        labels = agg_model.fit_predict(features)
+    elif args.algorithm == "birch":
+        birch_model = Birch(n_clusters=args.num_clusters)
+        labels = birch_model.fit_predict(features)
     partition = convert_labels_to_dict(labels)
 
     total_time = time.time() - start_time
     peak_memory = tracemalloc.get_traced_memory()[1] / 10**6
-    print(f"K-means clustering completed in {total_time:.2f} seconds.")
-    print(f"Peak memory usage during k-means: {peak_memory:.2f} MB")    
-    partition_path = output_dir / f"birch_k{args.num_clusters}_{total_time:.2f}_{peak_memory:.2f}.txt"
+    print(f"{args.algorithm.capitalize()} clustering completed in {total_time:.2f} seconds.")
+    print(f"Peak memory usage during {args.algorithm}: {peak_memory:.2f} MB")
+    partition_path = output_dir / f"{args.algorithm}_k{args.num_clusters}_{total_time:.2f}_{peak_memory:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")
 
@@ -49,6 +52,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run pooling on features")
     parser.add_argument("feature_dir", type=Path,  help="Directory containing feature .npy files")
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
-    parser.add_argument("num_clusters", type=int, help="Number of clusters for k-means algorithm")
+    parser.add_argument("num_clusters", type=int, help="Number of clusters for algorithm")
+    parser.add_argument("--algorithm", type=str, choices=["agglomerative", "birch"], default="birch", help="Hierarchical clustering algorithm to use")
     args = parser.parse_args()
     main(args)

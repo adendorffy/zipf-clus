@@ -118,7 +118,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run pooling on features")
     parser.add_argument("feature_dir", type=Path,  help="Directory containing feature .npy files")
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
-    parser.add_argument("num_clusters", type=int, help="Number of clusters for k-means algorithm")
+    parser.add_argument("num_clusters", type=int, help="Number of clusters for fbgmm algorithm")
     parser.add_argument("--n_iter", type=int, default=5, help="Number of iterations for Gibbs sampling")
     args = parser.parse_args()
     main(args)
