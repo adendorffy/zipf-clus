@@ -31,6 +31,36 @@ def convert_labels_to_dict(labels):
     partition = list(partition_dict.values())
     return partition
 
+def print_iteration_info(i, labels, log_marginal=None, K_target=None):
+    labels = np.asarray(labels)
+
+    unique, counts = np.unique(labels, return_counts=True)
+    active_clusters = len(unique)
+    empty_clusters = None if K_target is None else K_target - active_clusters
+
+    min_size = counts.min()
+    max_size = counts.max()
+    mean_size = counts.mean()
+    median_size = np.median(counts)
+
+    msg = (
+        f"iter={i:03d} | "
+        f"active={active_clusters}"
+    )
+
+    if K_target is not None:
+        msg += f"/{K_target} | empty={empty_clusters}"
+
+    msg += (
+        f" | size min/median/mean/max="
+        f"{min_size}/{median_size:.1f}/{mean_size:.1f}/{max_size}"
+    )
+
+    if log_marginal is not None:
+        msg += f" | log_marginal={float(log_marginal):.2f}"
+
+    print(msg)
+
 def main(args):
 
     # tracemalloc.start()
@@ -46,16 +76,27 @@ def main(args):
     print("Running FBGMM")
 
     prior = set_prior_diag(features)
-    fbgmm_model = FBGMM(features, prior, alpha=1.0, K=args.num_clusters, assignments="rand", covariance_type="diag")
-    n_iter = 5
-    record = fbgmm_model.gibbs_sample(n_iter)
+    fbgmm_model = FBGMM(features, prior, alpha=1000.0, K=args.num_clusters, assignments="rand", covariance_type="diag")
+    K_target = args.num_clusters
+    log_marginal_trace = []
 
-    labels = fbgmm_model.components.assignments
-    active_clusters = len(np.unique(labels))
+    for i in range(1, args.n_iter + 1):
+        fbgmm_model.gibbs_sample(1)   
 
-    print(f"Completed {n_iter} Gibbs iterations.")
-    print(f"Active clusters: {active_clusters}")
-    print(f"Log marginal trace: {record['log_marg']}")
+        labels = fbgmm_model.components.assignments
+
+        # Use the correct attribute/method from your FBGMM implementation
+        log_marginal = fbgmm_model.log_marg()
+        log_marginal_trace.append(log_marginal)
+
+        print_iteration_info(
+            i=i,
+            labels=labels,
+            log_marginal=log_marginal,
+            K_target=K_target,
+        )
+    active_clusters = len(np.unique(labels))   
+    n_iter = len(log_marginal_trace)
 
     partition = convert_labels_to_dict(labels)
 
@@ -78,5 +119,6 @@ if __name__ == "__main__":
     parser.add_argument("feature_dir", type=Path,  help="Directory containing feature .npy files")
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
     parser.add_argument("num_clusters", type=int, help="Number of clusters for k-means algorithm")
+    parser.add_argument("--n_iter", type=int, default=5, help="Number of iterations for Gibbs sampling")
     args = parser.parse_args()
     main(args)
