@@ -46,8 +46,31 @@ python edit.py [-h] [--pca_components PCA_COMPONENTS] [--threshold THRESHOLD] [-
 
 ---
 
+## 3. Continuous + Average Pooling + FBGMM
+
+This pipeline uses a Finite Bayesian Gaussian Mixture Model (FBGMM) to cluster pooled segment embeddings.
+
+### Step 1: Pool word segments
+
+Use `pooling.py` to average-pool frame-level features into segment-level embeddings.
+
+```bash
+python pooling.py [-h] [--n_components N_COMPONENTS] [--batch_size BATCH_SIZE] feature_dir boundary_dir
+```
+
+### Step 2: Run FBGMM clustering
+
+Cluster the pooled embeddings using Gibbs sampling with a diagonal-covariance FBGMM.
+
+```bash
+python fbgmm.py [-h] [--n_iter N_ITER] feature_dir output_dir num_clusters
+```
+
+---
+
 ## Summary
 
 * **Continuous pipeline:** pool segments → build cosine graph
 * **Discrete pipeline:** quantise segments → build edit-distance graph
+* **FBGMM:** pool segments → Bayesian mixture modelling → Gibbs sampling
 
