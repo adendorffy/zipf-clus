@@ -6,19 +6,25 @@ from bayes_gmm.niw import NIW
 
 from collections import defaultdict
 import time
-# import tracemalloc
 from pooling import load_pooled_features
 from utils import write_partition_to_file
 
-def set_prior_diag(X):
+def set_prior(X, k0):
     N, D = X.shape
-
     m_0 = np.mean(X, axis=0)
-    k_0 = 0.01
+    total_var = np.var(X, axis=0) + 1e-6
+
+    mu_scale_sq = np.mean(total_var)
+    covar_scale_sq = k0 * mu_scale_sq
+
+    k_0 = covar_scale_sq / mu_scale_sq
     v_0 = D + 3
 
-    var = np.var(X, axis=0) + 1e-6
-    S_0 = var * v_0   # vector, not matrix
+    S_0 = total_var * v_0
+
+    print(f"Estimated beta/k_0: {k_0:.6f}")
+    print(f"v_0: {v_0}")
+    print(f"mean variance: {mu_scale_sq:.6f}")
 
     return NIW(m_0, k_0, v_0, S_0)
 
@@ -31,7 +37,7 @@ def convert_labels_to_dict(labels):
     partition = list(partition_dict.values())
     return partition
 
-def print_iteration_info(i, labels, log_marginal=None, K_target=None):
+def print_iteration_info(i, labels, log_marginal=None, K_target=None, time=None):
     labels = np.asarray(labels)
 
     unique, counts = np.unique(labels, return_counts=True)
@@ -58,12 +64,14 @@ def print_iteration_info(i, labels, log_marginal=None, K_target=None):
 
     if log_marginal is not None:
         msg += f" | log_marginal={float(log_marginal):.2f}"
+    
+    if time is not None:
+        msg += f" | time={time:.2f}s"
 
     print(msg)
 
 def main(args):
 
-    # tracemalloc.start()
     features, filenames, intervals = load_pooled_features(args.feature_dir)
     start_time = time.time()
 
@@ -72,28 +80,29 @@ def main(args):
     print(f"Saving partition to {output_dir}")
 
     start_time = time.time()
-    # tracemalloc.reset_peak()
     print("Running FBGMM")
 
-    prior = set_prior_diag(features)
-    fbgmm_model = FBGMM(features, prior, alpha=1000.0, K=args.num_clusters, assignments="rand", covariance_type="diag")
+    prior = set_prior(features, args.k0)
+    fbgmm_model = FBGMM(features, prior, alpha=args.alpha, K=args.num_clusters, assignments="rand", covariance_type="diag")
     K_target = args.num_clusters
     log_marginal_trace = []
 
     for i in range(1, args.n_iter + 1):
+        time_start = time.time()
         fbgmm_model.gibbs_sample(1)   
 
         labels = fbgmm_model.components.assignments
 
-        # Use the correct attribute/method from your FBGMM implementation
         log_marginal = fbgmm_model.log_marg()
         log_marginal_trace.append(log_marginal)
+        time_total = time.time() - time_start
 
         print_iteration_info(
             i=i,
             labels=labels,
             log_marginal=log_marginal,
             K_target=K_target,
+            time=time_total
         )
     active_clusters = len(np.unique(labels))   
     n_iter = len(log_marginal_trace)
@@ -120,5 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
     parser.add_argument("num_clusters", type=int, help="Number of clusters for fbgmm algorithm")
     parser.add_argument("--n_iter", type=int, default=5, help="Number of iterations for Gibbs sampling")
+    parser.add_argument("--alpha", type=float, default=1.0, help="Concentration parameter for Dirichlet Process")
+    parser.add_argument("--k0", type=float, default=0.01, help="Scale parameter for the prior")
     args = parser.parse_args()
     main(args)
