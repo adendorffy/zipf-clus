@@ -115,7 +115,7 @@ def main(args):
 
     partition_path = output_dir / (
         f"fbgmm_k{args.num_clusters}_iter{n_iter}_"
-        f"active{active_clusters}_{total_time:.2f}.txt"
+        f"alpha{args.alpha}_k0{args.k0}_{total_time:.2f}.txt"
     )
 
     write_partition_to_file(partition, filenames, intervals, partition_path)

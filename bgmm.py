@@ -5,7 +5,6 @@ from sklearn.mixture import BayesianGaussianMixture
 
 from collections import defaultdict
 import time
-# import tracemalloc
 from pooling import load_pooled_features
 from utils import write_partition_to_file
 
@@ -20,7 +19,6 @@ def convert_labels_to_dict(labels):
 
 def main(args):
 
-    # tracemalloc.start()
     features, filenames, intervals = load_pooled_features(args.feature_dir)
     start_time = time.time()
 
@@ -29,18 +27,15 @@ def main(args):
     print(f"Saving partition to {output_dir}")
 
     start_time = time.time()
-    # tracemalloc.reset_peak()
-    print("Running hierarchical clustering with sklearn")
+    print("Running Bayesian GMM clustering with sklearn")
 
-    gmm_model = BayesianGaussianMixture(n_components=args.num_clusters + 2000, covariance_type='spherical', max_iter=1000, random_state=42)
+    gmm_model = BayesianGaussianMixture(n_components=args.num_clusters + 2000, covariance_type='diag', random_state=42)
     labels = gmm_model.fit_predict(features)
     partition = convert_labels_to_dict(labels)
 
     total_time = time.time() - start_time
-    # peak_memory = tracemalloc.get_traced_memory()[1] / 10**6
-    print(f"K-means clustering completed in {total_time:.2f} seconds.")
-    # print(f"Peak memory usage during k-means: {peak_memory:.2f} MB")
-    partition_path = output_dir / f"gmm_k{args.num_clusters}_{total_time:.2f}.txt"
+    print(f"Bayesian GMM clustering completed in {total_time:.2f} seconds.")
+    partition_path = output_dir / f"bgmm_k{args.num_clusters}_{total_time:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")
 
