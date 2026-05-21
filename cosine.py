@@ -11,18 +11,16 @@ from utils import batch_indices, partition_graph, write_partition_to_file
 
 
 def compute_edges_batch(batch_indices, features, threshold):
-    
     batch_feat = features[batch_indices]
-    sims = (batch_feat @ features.T).astype(np.float32)
+    sims = batch_feat @ features.T
+
+    src_rows, dst_cols = np.where((1 - sims) <= threshold)
 
     edges = []
-    for i in range(len(batch_indices)):
-        src = batch_indices[i]
-        for j in range(src + 1, len(features)):
-            sim = sims[i, j]
-            cos_dist = 1 - sim
-            if cos_dist <= threshold:
-                edges.append((src, j, sim)) 
+    for row, dst in zip(src_rows, dst_cols):
+        src = batch_indices[row]
+        if dst > src:
+            edges.append((src, int(dst), float(sims[row, dst])))
 
     return edges
 
@@ -31,6 +29,7 @@ def main(args):
 
     tracemalloc.start()
     features, filenames, intervals = load_pooled_features(args.feature_dir)
+    features = features.astype(np.float32)
 
     graph_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:]) / "graphs"
     existing_graphs = list(graph_dir.glob(f"cosine_t{args.threshold}_*.pkl"))
@@ -63,9 +62,9 @@ def main(args):
         graph = ig.Graph()
         graph.add_vertices(len(features))
 
-        batch_edges = Parallel(n_jobs=-1)(
-            delayed(compute_edges_batch)(batch, features, args.threshold)                
-            for batch in tqdm(list(batch_indices(len(features), batch_size=1_000)), desc="Computing edges")
+        batch_edges = Parallel(n_jobs=args.n_jobs)(
+            delayed(compute_edges_batch)(batch, features, args.threshold)
+            for batch in tqdm(list(batch_indices(len(features), batch_size=args.batch_size)), desc="Computing edges")
         )
         del features
         edges = [edge for batch in batch_edges for edge in batch]
@@ -107,7 +106,8 @@ if __name__ == "__main__":
     parser.add_argument("feature_dir", type=Path,  help="Directory containing feature .npy files")
     parser.add_argument("output_dir", type=Path, help="Directory to save pooled features")
     parser.add_argument("num_clusters", type=int, help="Number of clusters for Leiden algorithm")
-    parser.add_argument("--pca_components", type=int, default=350, help="Number of PCA components to retain")
+    parser.add_argument("--n_jobs", type=int, default=-1, help="Number of parallel jobs for edge computation")
+    parser.add_argument("--batch_size", type=int, default=1_000, help="Batch size for edge computation")
     parser.add_argument("--threshold", type=float, default=0.5, help="Cosine distance threshold for edge creation")
     parser.add_argument("--resolution", type=float, default=0.5, help="Resolution parameter for Leiden algorithm")
     parser.add_argument("--max_iter", type=int, default=15, help="Maximum iterations for Leiden algorithm")
