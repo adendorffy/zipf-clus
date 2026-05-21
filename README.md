@@ -19,7 +19,9 @@ python pooling.py [-h] [--n_components N_COMPONENTS] [--batch_size BATCH_SIZE] f
 Use the pooled segment embeddings to construct a cosine-similarity graph and run clustering.
 
 ```bash
-python cosine.py [-h] [--pca_components PCA_COMPONENTS] [--threshold THRESHOLD] [--resolution RESOLUTION] [--max_iter MAX_ITER] [--tolerance TOLERANCE] feature_dir output_dir num_clusters
+python cosine.py [-h] [--n_jobs N_JOBS] [--batch_size BATCH_SIZE] [--threshold THRESHOLD] [--resolution RESOLUTION] [--max_iter MAX_ITER]
+                 [--tolerance TOLERANCE]
+                 feature_dir output_dir num_clusters
 ```
 
 ---
