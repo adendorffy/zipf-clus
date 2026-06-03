@@ -11,7 +11,6 @@ from utils import (
     batch_indices,
     partition_graph,
     write_partition_to_file,
-    partition_graph_bisection,
 )
 import leidenalg as la
 
