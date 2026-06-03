@@ -63,7 +63,7 @@ def main(args):
         graph.add_vertices(len(features))
         graph.add_edges([(src, dst) for src, dst in zip(src, dst)])
         graph.es["weight"] = [weight for weight in weights]
-        if len(existing_edges[0].stem.split("_")) > 3:
+        if len(existing_edges[0].stem.split("_")) > 4:
             graph_time = float(existing_edges[0].stem.split("_")[-3])
             graph_peak = float(existing_edges[0].stem.split("_")[-2])
         else:
