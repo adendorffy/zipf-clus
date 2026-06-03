@@ -70,21 +70,22 @@ class FBGMM(object):
         N, D = X.shape
 
         # Initial component assignments
-        if assignments == "rand":
-            assignments = np.random.randint(0, K, N)
+        if isinstance(assignments, str):
+            if assignments == "rand":
+                assignments = np.random.randint(0, K, N)
 
-            # Make sure we have consequetive values
-            for k in range(assignments.max()):
-                while len(np.nonzero(assignments == k)[0]) == 0:
-                    assignments[np.where(assignments > k)] -= 1
-                if assignments.max() == k:
-                    break
-        elif assignments == "each-in-own":
-            assignments = np.arange(N)
+                # Make sure we have consequetive values
+                for k in range(assignments.max()):
+                    while len(np.nonzero(assignments == k)[0]) == 0:
+                        assignments[np.where(assignments > k)] -= 1
+                    if assignments.max() == k:
+                        break
+            elif assignments == "each-in-own":
+                assignments = np.arange(N)
         else:
             # assignments is a vector
             pass
-
+            
         if covariance_type == "full":
             self.components = GaussianComponents(X, prior, assignments, K_max=K)
         elif covariance_type == "diag":

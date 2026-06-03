@@ -98,7 +98,8 @@ class Pooling:
         
         for feature_file in tqdm(feature_files, desc="Transforming features"):
             features = np.load(feature_file)
-            if features.size == 0: continue
+            if features.size == 0: 
+                continue
             if features.ndim == 1:
                 features = features.reshape(1, -1)
                 
@@ -119,13 +120,18 @@ class Pooling:
                     out_path = self.output_dir / feature_file.relative_to(self.feature_dir).parent / f"{feature_file.stem}_{start}_{end}.npy"
                     
                     if out_path.exists():
+                        print(f"Warning: Skipping existing segment for {feature_file.stem} at boundary {end}")
                         start = end
                         continue
 
-                    if end == start: continue
+                    if end == start: 
+                        print(f"Warning: Skipping zero-length segment for {feature_file.stem} at boundary {end}")
+                        continue
 
                     segment = pca_features[start:end]
-                    if segment.size == 0: continue
+                    if segment.size == 0: 
+                        print(f"Warning: Skipping zero-length segment for {feature_file.stem} at boundary {end}")
+                        continue
 
                     pooled_segment = np.mean(segment, axis=0)
                     pooled_feature = np.asarray(pooled_segment, dtype=np.float32)       
@@ -133,6 +139,13 @@ class Pooling:
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     np.save(out_path, pooled_feature)
                     start = end
+            else:
+                print(f"Warning: No boundaries found for {feature_file.stem}. Saving pooled feature for entire segment.")
+                pooled_feature = np.mean(pca_features, axis=0)
+                pooled_feature = np.asarray(pooled_feature, dtype=np.float32)
+                out_path = self.output_dir / feature_file.relative_to(self.feature_dir).parent / f"{feature_file.stem}_0_{features.shape[0]}.npy"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                np.save(out_path, pooled_feature)
 
 def load_pooled_features(feature_dir):
 

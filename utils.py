@@ -11,8 +11,8 @@ def batch_indices(total_length, batch_size):
     for i in range(0, total_length, batch_size):
         yield range(i, min(i + batch_size, total_length))
 
-def partition_graph(graph, num_clusters, resolution=0.5, max_iterations=15, tolerance=5):
-    print(f"Using graph with {graph.vcount():,} vertices and {graph.ecount():,} edges for partitioning.")
+def partition_graph(graph, num_clusters, quality_function=la.CPMVertexPartition, resolution=0.5, max_iterations=15, tolerance=5):
+    print(f"Using graph with {graph.vcount():,} vertices and {graph.ecount():,} edges for partitioning with {quality_function.__name__}.")
 
     tolerance = 5
     lr = 0.1
@@ -23,7 +23,7 @@ def partition_graph(graph, num_clusters, resolution=0.5, max_iterations=15, tole
 
     partition = la.find_partition(
         graph,
-        la.CPMVertexPartition,
+        quality_function,
         weights="weight",
         resolution_parameter=resolution,
         seed=42,
@@ -72,6 +72,7 @@ def partition_graph(graph, num_clusters, resolution=0.5, max_iterations=15, tole
         )
 
     return best_partition, best_partition.resolution_parameter
+
 
 def write_partition_to_file(partition, filenames, intervals, output_path):
     
