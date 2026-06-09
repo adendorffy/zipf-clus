@@ -7,10 +7,10 @@ Builds a cosine-similarity graph over segment embeddings and partitions it
 into clusters using the Leiden community-detection algorithm.
 
 Pipeline:
-  1. Graph construction – for each pair of segments whose cosine *distance*
-     (1 − similarity) is at or below ``--threshold``, an undirected weighted
-     edge is added with the cosine similarity as its weight.  Edge computation
-     is parallelised across row-batches with joblib.
+  1. Graph construction – for each pair of segments whose cosine similarity
+     is at or above ``--threshold``, an undirected weighted edge is added
+     with the cosine similarity as its weight.  Edge computation is
+     parallelised across row-batches with joblib.
 
   2. Caching – the graph (or its edge list for very large graphs) is written
      to disk so the expensive construction step can be skipped on reruns:
@@ -47,37 +47,38 @@ from utils import batch_indices, partition_graph, write_partition_to_file
 
 
 def compute_edges_batch(batch_idx, features, threshold):
-    """Compute all edges originating from a batch of source nodes.
+    """Compute edges for a batch of source nodes using cosine similarity.
 
-    For each source node in ``batch_idx``, computes cosine similarities
-    against all nodes via a matrix-vector product (features are assumed to be
-    L2-normalised, so the dot product equals cosine similarity).  An edge is
-    emitted for every target node whose cosine *distance* (1 − similarity) is
-    at or below ``threshold``.  Only upper-triangle edges (dst > src) are
-    returned to avoid duplicates.
+    Performs a batched matrix multiplication between the embeddings indexed by
+    *batch_idx* and the full feature matrix to obtain pairwise cosine
+    similarities (assumes rows are L2-normalised). Edges are retained when the
+    cosine similarity meets *threshold*; only pairs where ``dst > src`` are
+    kept to avoid duplicates.
 
-    Args:
-        batch_idx (range | list[int]): Indices of source nodes in this batch.
-        features (np.ndarray): L2-normalised segment embeddings, shape
-            ``(N, D)``, shared across all parallel workers.
-        threshold (float): Maximum cosine distance for an edge to be created.
+    Parameters
+    ----------
+    batch_idx : array-like of int
+        Row indices into *features* for the source nodes in this batch.
+    features : numpy.ndarray of shape (N, D), dtype float32
+        L2-normalised segment embeddings.
+    threshold : float
+        Minimum cosine similarity for an edge to be retained.
 
-    Returns:
-        list[tuple[int, int, float]]: Each tuple is
-            ``(src_node_id, dst_node_id, cosine_similarity)``.
+    Returns
+    -------
+    list of tuple(int, int, float)
+        Each tuple is ``(src_index, dst_index, similarity)``.
     """
+
     batch_feat = features[batch_idx]
 
     # Dot product of L2-normalised vectors equals cosine similarity.
     sims = batch_feat @ features.T
-
-    # Find pairs whose cosine distance is within the threshold.
-    src_rows, dst_cols = np.where((1 - sims) <= threshold)
+    src_rows, dst_cols = np.where(sims >= threshold)
 
     edges = []
     for row, dst in zip(src_rows, dst_cols):
         src = batch_idx[row]
-        # Keep only upper-triangle to avoid duplicate edges.
         if dst > src:
             edges.append((src, int(dst), float(sims[row, dst])))
 
@@ -90,27 +91,46 @@ def compute_edges_batch(batch_idx, features, threshold):
 
 
 def main(args):
-    """Build the cosine graph (or load a cached version) and run Leiden.
+    """Run the full cosine-similarity graph construction and Leiden partitioning pipeline.
 
-    Three execution paths are taken depending on what is already cached:
-      - Cached pickle  → load graph directly.
-      - Cached NPZ     → reconstruct graph from edge list.
-      - No cache       → compute edges in parallel, build graph, cache result.
+    Loads L2-normalised pooled embeddings from ``args.feature_dir`` and constructs
+    a similarity graph where edges connect segment pairs whose cosine similarity
+    meets ``args.threshold``. Three execution paths are supported depending on
+    what is cached under ``args.output_dir``: (A) load a previously serialised
+    igraph pickle directly; (B) reconstruct the graph from a cached compressed
+    edge list (NPZ), used when the edge count exceeded 10 million at construction
+    time; or (C) compute edges from scratch in parallel batches, then serialise
+    the result as a pickle or NPZ accordingly.
 
-    Timing and peak memory metadata are recovered from cached filenames so
-    they can be aggregated into the final output filename.
+    The Leiden algorithm is then run via :func:`utils.partition_graph`, which
+    tunes the resolution parameter ``gamma`` to target ``args.num_clusters``
+    clusters within ``args.tolerance``. The final partition is written to a
+    plain-text file named after the threshold, resolution, and total runtime.
 
-    Args:
-        args: Parsed CLI arguments (see ``__main__`` block for full list).
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments. Expected attributes:
+
+        - ``feature_dir`` (*Path*): directory containing pooled embedding files.
+        - ``output_dir`` (*Path*): root output directory.
+        - ``num_clusters`` (*int*): target number of Leiden clusters.
+        - ``threshold`` (*float*): minimum cosine similarity for an edge.
+        - ``n_jobs`` (*int*): number of parallel workers for edge computation.
+        - ``batch_size`` (*int*): source nodes per parallel batch.
+        - ``resolution`` (*float*): initial Leiden resolution parameter ``gamma``.
+        - ``max_iter`` (*int*): maximum resolution-tuning iterations.
+        - ``tolerance`` (*float*): acceptable deviation from ``num_clusters``.
+        - ``quality_function`` (*str*): Leiden quality function key
+          (``"modularity"``, ``"cpm"``, or ``"rb"``).
     """
 
-    # Load and L2-normalise segment embeddings (shape: N × D).
+
     features, filenames, intervals = load_pooled_features(args.feature_dir)
     features = features.astype(np.float32)
 
     graph_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:]) / "graphs"
 
-    # Check for previously cached graph artefacts.
     existing_graphs = list(graph_dir.glob(f"cosine_t{args.threshold}_*.pkl"))
     existing_edges = list(graph_dir.glob(f"cosine_t{args.threshold}_*_edges.npz"))
 
@@ -122,7 +142,7 @@ def main(args):
         graph = ig.Graph.Read_Pickle(existing_graphs[0])
 
         # Recover timing from the filename convention
-        # cosine_t<threshold>_<time>_<mem>.pkl
+        # cosine_t<threshold>_<time>.pkl
         stem_parts = existing_graphs[0].stem.split("_")
         if len(stem_parts) > 3:
             graph_time = float(stem_parts[-2])
@@ -149,7 +169,7 @@ def main(args):
         graph.es["weight"] = weights.tolist()
 
         # Recover timing from the filename convention
-        # cosine_t<threshold>_<time>_<mem>_edges.npz
+        # cosine_t<threshold>_<time>edges.npz
         stem_parts = existing_edges[0].stem.split("_")
         if len(stem_parts) > 4:
             graph_time = float(stem_parts[-3])
@@ -167,7 +187,6 @@ def main(args):
         graph = ig.Graph()
         graph.add_vertices(len(features))
 
-        # Parallelise similarity computation across row-batches.
         n_batches = (len(features) + args.batch_size - 1) // args.batch_size
         batch_edges = Parallel(n_jobs=args.n_jobs)(
             delayed(compute_edges_batch)(batch_idx, features, args.threshold)
@@ -178,10 +197,8 @@ def main(args):
             )
         )
 
-        # Free the feature matrix before building the graph to reduce peak memory.
         del features
 
-        # Flatten the list-of-lists returned by the parallel workers.
         edges = [edge for batch in batch_edges for edge in batch]
         del batch_edges
 
@@ -193,8 +210,6 @@ def main(args):
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
 
         if len(edges) > 10_000_000:
-            # Very dense graphs are too large for pickle; save the edge list
-            # as a compressed NPZ instead and reconstruct on reload.
             print(
                 f"Warning: Graph has {len(edges):,} edges, "
                 "saving edges as NPZ instead of pickle."
@@ -211,7 +226,6 @@ def main(args):
     # Leiden partitioning
     # ------------------------------------------------------------------
 
-    # Map CLI string to leidenalg quality-function class.
     quality_function_map = {
         "modularity": la.ModularityVertexPartition,
         "cpm": la.CPMVertexPartition,
@@ -236,7 +250,6 @@ def main(args):
     total_time = graph_time + partition_time
     print(f"Total time (graph construction + partitioning): {total_time:.2f} seconds.")
 
-    # Embed threshold, tuned resolution, timing, and memory in the filename.
     partition_path = (
         graph_dir.parent / f"cosine_t{args.threshold}_r{resolution:.4f}"
         f"_{total_time:.2f}.txt"
@@ -285,7 +298,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.5,
+        default=0.5, ## tau in paper = 1 - threshold
         help="Maximum cosine distance for an edge to be created (default: 0.5).",
     )
     parser.add_argument(
