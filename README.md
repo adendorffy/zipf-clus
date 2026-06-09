@@ -30,11 +30,11 @@ This repository contains the code for the paper:
 | ---------------------------- | --------------------------------------- | ---------------------------- |
 | Cosine graph + Leiden        | Continuous (PCA-projected, mean-pooled) | Graph community detection    |
 | Edit-distance graph + Leiden | Discrete (KMeans-quantised)             | Graph community detection    |
-| KMeans                       | Continuous                              | k-means++ + FAISS            |
-| BIRCH                        | Continuous                              | Balanced CF-Tree             |
-| Agglomerative                | Continuous                              | Hierarchical                 |
-| GMM                          | Continuous                              | EM (spherical covariance)    |
-| FBGMM                        | Continuous                              | Bayesian GMM, Gibbs sampling |
+| KMeans                       | Continuous (PCA-projected, mean-pooled) | k-means++ + FAISS            |
+| BIRCH                        | Continuous (PCA-projected, mean-pooled) | Balanced CF-Tree             |
+| Agglomerative                | Continuous (PCA-projected, mean-pooled) | Hierarchical                 |
+| GMM                          | Continuous (PCA-projected, mean-pooled) | EM (spherical covariance)    |
+| FBGMM                        | Continuous (PCA-projected, mean-pooled) | Bayesian GMM, Gibbs sampling |
 
 ---
 
