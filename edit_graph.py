@@ -8,8 +8,8 @@ partitions it into clusters using the Leiden community-detection algorithm.
 
 Unlike the cosine graph (which operates on continuous embeddings), this script
 works on discrete unit sequences produced by ``quantiser.py``.  Edges are
-added between pairs of segments whose normalised edit distance is at or below
-``--threshold``, with edge weight = 1 − normalised_edit_distance.
+added between pairs of segments whose normalised edit similarity (1 - normalised_edit_distance) is at or above
+``--threshold``, with edge weight = normalised edit similarity.
 
 Two early-exit heuristics are applied before the full edit-distance call to
 prune obviously distant pairs cheaply:
@@ -22,7 +22,7 @@ across row-batches with joblib.  The resulting graph is cached as an igraph
 pickle for reuse across runs.
 
 Output:
-  A plain-text partition file ``edit_t<t>_r<res>_<time>.txt`` written by
+  A plain-text partition file ``edit_t<threshold>_r<res>_<time>.txt`` written by
   ``utils.write_partition_to_file``.
 """
 
@@ -35,7 +35,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from quantise import load_quantised_segments
+from quantiser import load_quantised_segments
 from utils import batch_indices, partition_graph, write_partition_to_file
 
 
@@ -45,30 +45,33 @@ from utils import batch_indices, partition_graph, write_partition_to_file
 
 
 def compute_edges_batch(batch, features, lengths, threshold):
-    """Compute edit-distance edges for a batch of source nodes.
+    """Compute edges for a batch of source nodes using normalised edit similarity.
 
-    For each source node ``i`` in ``batch``, compares against all nodes
-    ``j > i`` (upper triangle only, to avoid duplicate edges).  Two
-    pruning steps are applied before the O(|fi|·|fj|) edit-distance call:
-      1. Skip pairs where ``max(|fi|, |fj|) == 0``.
-      2. Skip pairs where ``|li − lj| / max(li, lj) > threshold`` — if the
-         length ratio alone violates the threshold, edit distance can only be
-         worse.
+    For each source node ``i`` in *batch*, iterates over all nodes ``j > i``
+    and adds an edge when the normalised edit similarity between token sequences
+    ``features[i]`` and ``features[j]`` is at least *threshold*. A length-ratio
+    filter is applied first to prune pairs whose length difference alone
+    guarantees the similarity threshold cannot be met.
 
-    Edge weight is set to ``1 − normalised_edit_distance`` so that more
-    similar segments receive higher weights (consistent with the cosine graph).
+    Parameters
+    ----------
+    batch : sequence of int
+        Indices of source nodes to process in this batch.
+    features : list of sequence
+        Quantised token sequences, one per segment.
+    lengths : numpy.ndarray of shape (N,), dtype int32
+        Pre-computed lengths of each token sequence.
+    threshold : float
+        Minimum normalised edit similarity
+        ``1 - editdistance / max(len_i, len_j)`` for an edge to be retained.
+        Also used as the length-ratio filter bound.
 
-    Args:
-        batch (range | list[int]): Source node indices for this batch.
-        features (list[np.ndarray]): Quantised unit sequences, one per segment.
-        lengths (np.ndarray[int32]): Pre-computed sequence lengths,
-            shape ``(N,)``.
-        threshold (float): Maximum normalised edit distance for an edge.
-
-    Returns:
-        list[tuple[int, int, float]]: Each tuple is
-            ``(src_node_id, dst_node_id, edge_weight)``.
+    Returns
+    -------
+    list of tuple(int, int, float)
+        Each tuple is ``(src_index, dst_index, similarity)``.
     """
+
     edges = []
     n = len(features)
 
@@ -80,19 +83,16 @@ def compute_edges_batch(batch, features, lengths, threshold):
             lj = lengths[j]
             max_len = li if li >= lj else lj
 
-            # Skip degenerate empty sequences.
             if max_len == 0:
                 continue
 
-            # Length-ratio pruning: if the sequences differ too much in
-            # length they cannot be within the edit-distance threshold.
             if abs(li - lj) / max_len > threshold:
                 continue
 
-            # Full normalised edit distance.
             dist = editdistance.eval(fi, features[j]) / max_len
-            if dist <= threshold:
-                edges.append((i, j, 1.0 - dist))
+            similarity = 1.0 - dist
+            if similarity >= threshold:
+                edges.append((i, j, similarity))
 
     return edges
 
@@ -103,18 +103,34 @@ def compute_edges_batch(batch, features, lengths, threshold):
 
 
 def main(args):
-    """Build the edit-distance graph (or load a cached version) and run Leiden.
+    """Run the full edit-distance graph construction and Leiden partitioning pipeline.
 
-    Args:
-        args: Parsed CLI arguments (see ``__main__`` block for full list).
+    Loads quantised token sequences from ``args.feature_dir`` and constructs a
+    similarity graph where edges connect segment pairs whose normalised edit
+    similarity meets ``args.threshold``. If a cached graph pickle exists under
+    ``args.output_dir``, it is loaded directly to skip edge computation.
+    Otherwise, edges are computed in parallel batches and the graph is
+    serialised as a pickle for future reuse.
 
-    Note:
-        ``--pca_components`` is accepted by the parser but is not currently
-        used in this script.  It may be intended for a future preprocessing
-        step applied to the quantised features before graph construction.
+    The Leiden algorithm is then run via :func:`utils.partition_graph`, which
+    tunes the resolution parameter ``gamma`` to target ``args.num_clusters``
+    clusters within ``args.tolerance``. The final partition is written to a
+    plain-text file named after the threshold, resolution, and total runtime.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments. Expected attributes:
+
+        - ``feature_dir`` (*Path*): directory containing quantised segment files.
+        - ``output_dir`` (*Path*): root output directory.
+        - ``num_clusters`` (*int*): target number of Leiden clusters.
+        - ``threshold`` (*float*): minimum normalised edit similarity for an edge.
+        - ``resolution`` (*float*): initial Leiden resolution parameter ``gamma``.
+        - ``max_iter`` (*int*): maximum resolution-tuning iterations.
+        - ``tolerance`` (*float*): acceptable deviation from ``num_clusters``.
     """
-    # Load quantised unit sequences and pre-compute their lengths to avoid
-    # repeated len() calls inside the inner loop of compute_edges_batch.
+
     features, filenames, intervals = load_quantised_segments(args.feature_dir)
     lengths = np.array([len(f) for f in features], dtype=np.int32)
 
@@ -132,13 +148,13 @@ def main(args):
         # edit_t<threshold>_<time>.pkl  (memory not tracked for this graph).
         stem_parts = existing_graphs[0].stem.split(
             "_"
-        )  # was existing_graphs.stem — bug fix
-        if len(stem_parts) >= 3:  # was len(... >= 3) — bug fix
+        )  
+        if len(stem_parts) >= 3:  
             graph_time = float(stem_parts[-2])
         else:
             graph_time = float(stem_parts[-1])
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------
     # Path B: compute edges from scratch
     # ------------------------------------------------------------------
     else:
@@ -162,7 +178,6 @@ def main(args):
             for batch in tqdm(batches, desc="Computing edges")
         )
 
-        # Flatten the per-batch edge lists into a single list.
         edges = [edge for batch in batch_edges for edge in batch]
 
         graph.add_edges([(src, dst) for src, dst, _ in edges])
@@ -171,7 +186,6 @@ def main(args):
         graph_time = time.time() - start_time
         print(f"Graph construction completed in {graph_time:.2f} seconds.")
 
-        # Cache the graph for future runs.
         graph_path = graph_dir / f"edit_t{args.threshold}_{graph_time:.2f}.pkl"
         graph.write_pickle(graph_path)
         print(f"Graph saved to {graph_path}")
@@ -194,7 +208,6 @@ def main(args):
     total_time = graph_time + partition_time
     print(f"Total time (graph construction + partitioning): {total_time:.2f} seconds.")
 
-    # Embed threshold, tuned resolution, and total time in the filename.
     partition_path = (
         graph_dir.parent
         / f"edit_t{args.threshold}_r{resolution:.4f}_{total_time:.2f}.txt"
