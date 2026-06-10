@@ -7,20 +7,26 @@ This repository contains the code for the paper:
 
 <!-- > _Conference/Journal Name, Year_ -->
 
-<!-- [[Paper](link)] [[BibTeX](#citation)] -->
+[[Paper](https://arxiv.org/abs/2606.10781)] [[BibTeX](#citation)]
 
-<!-- ---
+---
+
+## Abstract
+
+Unsupervised term discovery involves segmenting unlabelled speech into word- or syllable-like units and clustering these into a lexicon of candidate types. True lexicons follow a Zipfian distribution, yet the dominant centre-based clustering approach — K-means — produces a more uniform distribution due to an inductive bias toward spherical clusters. In this paper we revisit graph-based clustering as a bottom-up alternative, where segment embeddings are connected by pairwise similarity and partitioned using the Leiden algorithm. We show that graph clustering substantially outperforms centre-based approaches (K-means, GMM, BIRCH) in both word- and syllable-level lexicon discovery across three languages, producing more Zipf-like distributions. Another bottom-up approach, agglomerative clustering with average linkage, also performs well, although it is computationally less efficient and allows for less control over the resulting distribution. Our work calls into question the dominance of centre-based clustering for term discovery, and promotes graph clustering as an attractive alternative.
+
+---
 
 ## Citation
 
 ```bibtex
-@inproceedings{yourname2026zipfian,
+@article{slabbert2026zipfian,
   title     = {Recovering the {Zipfian} Distribution in Unsupervised Term Discovery},
-  author    = {Your Name and Co-author Name and Co-author Name},
-  booktitle = {Proc. IEEE Spoken Language Technology Workshop (SLT)},
+  author    = {Danel Slabbert and Simon Malan and Herman Kamper},
+  journal = {{arXiv} preprint {arXiv}:2606.10781},
   year      = {2026},
 }
-``` -->
+```
 
 ---
 
