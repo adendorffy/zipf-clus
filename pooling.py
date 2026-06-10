@@ -51,15 +51,13 @@ class Pooling:
         self.feature_dir = Path(feature_dir)
         self.boundary_dir = Path(boundary_dir)
 
-        self.scaler_model = None  # sklearn StandardScaler, set after fit()
-        self.pca_model = None  # sklearn PCA / IncrementalPCA, set after fit()
+        self.scaler_model = None
+        self.pca_model = None
         self.pca_components = pca_components
 
-        # Derive and create output directory based on feature / boundary paths.
         self.output_dir = self.set_output_dir()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Paths at which the fitted models are cached between runs.
         self.scaler_path = self.output_dir / "scaler_model.npy"
         self.pca_path = self.output_dir / "pca_model.npy"
 
@@ -102,7 +100,6 @@ class Pooling:
         automatically delegates to :meth:`fit_batched` to avoid memory
         exhaustion.
         """
-        # Re-use cached models if available.
         if self.scaler_path.exists() and self.pca_path.exists():
             print("Loading existing scaler and PCA models...")
             self.scaler_model = np.load(self.scaler_path, allow_pickle=True).item()
@@ -111,7 +108,6 @@ class Pooling:
 
         feature_files = sorted(self.feature_dir.rglob("*.npy"))
 
-        # Fall back to memory-efficient incremental fitting for large corpora.
         if len(feature_files) > 10_000:
             print(
                 f"Warning: Found {len(feature_files)} feature files. "
@@ -122,7 +118,6 @@ class Pooling:
 
         print("Fitting scaler and PCA on all features at once...")
 
-        # Stack all frame-level features into (N_frames, D) matrix.
         features = [np.load(f) for f in tqdm(feature_files, desc="Loading features")]
         features = np.vstack(features)
 
@@ -155,7 +150,6 @@ class Pooling:
             batch_size (int): Number of feature files processed per chunk.
                 Defaults to 10 000.
         """
-        # Re-use cached models if available.
         if self.scaler_path.exists() and self.pca_path.exists():
             print("Loading existing scaler and PCA models...")
             self.scaler_model = np.load(self.scaler_path, allow_pickle=True).item()
@@ -207,7 +201,6 @@ class Pooling:
         """
         feature_files = sorted(self.feature_dir.rglob("*.npy"))
 
-        # Pre-load all boundary files into a dict keyed by utterance stem.
         all_boundaries = {}
         for boundary_file in sorted(self.boundary_dir.rglob("*.list")):
             all_boundaries[boundary_file.stem] = np.loadtxt(boundary_file)
@@ -215,15 +208,12 @@ class Pooling:
         for feature_file in tqdm(feature_files, desc="Transforming features"):
             features = np.load(feature_file)
 
-            # Skip empty files.
             if features.size == 0:
                 continue
 
-            # Ensure 2-D shape (n_frames, D) even for single-frame utterances.
             if features.ndim == 1:
                 features = features.reshape(1, -1)
 
-            # Project frames through scaler → PCA.
             scaled_features = self.scaler_model.transform(features)
             pca_features = self.pca_model.transform(scaled_features)
 
@@ -232,17 +222,13 @@ class Pooling:
             if segment_name in all_boundaries:
                 boundaries = all_boundaries[segment_name]
 
-                # Normalise boundaries to a 1-D array regardless of how
-                # many boundaries the file contains.
                 if not isinstance(boundaries, np.ndarray):
                     boundaries = np.array(boundaries)
                 if boundaries.ndim == 0:
                     boundaries = np.array([boundaries])
 
-                # Convert boundary timestamps (seconds) to frame indices.
                 boundaries = [seconds_to_frames(b) for b in boundaries]
 
-                # Slice and pool each inter-boundary segment.
                 start = 0
                 for end in boundaries:
                     out_path = (
@@ -251,7 +237,6 @@ class Pooling:
                         / f"{feature_file.stem}_{start}_{end}.npy"
                     )
 
-                    # Skip already-processed segments (allows resuming).
                     if out_path.exists():
                         print(
                             f"Warning: Skipping existing segment for "
@@ -260,7 +245,6 @@ class Pooling:
                         start = end
                         continue
 
-                    # Skip degenerate zero-length segments.
                     if end == start:
                         print(
                             f"Warning: Skipping zero-length segment for "
@@ -276,7 +260,6 @@ class Pooling:
                         )
                         continue
 
-                    # Mean-pool frames → single embedding vector.
                     pooled_segment = np.mean(segment, axis=0)
                     pooled_feature = np.asarray(pooled_segment, dtype=np.float32)
 
@@ -285,7 +268,6 @@ class Pooling:
                     start = end
 
             else:
-                # No boundary file: pool the entire utterance as one segment.
                 print(
                     f"Warning: No boundaries found for {feature_file.stem}. "
                     "Saving pooled feature for entire segment."
@@ -332,7 +314,6 @@ def load_pooled_features(feature_dir):
     features, filenames, intervals = [], [], []
 
     for feature_file in tqdm(feature_files, desc="Loading pooled features"):
-        # Skip serialised model artefacts stored alongside the embeddings.
         if "model" in feature_file.stem:
             continue
 
@@ -347,7 +328,6 @@ def load_pooled_features(feature_dir):
 
     features = np.asarray(features, dtype=np.float32)
 
-    # Mean-centre then L2-normalise so cosine similarity == dot product.
     features = features - np.mean(features, axis=0)
     features = features / (np.linalg.norm(features, axis=1, keepdims=True) + 1e-10)
 

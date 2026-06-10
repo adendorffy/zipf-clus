@@ -39,10 +39,8 @@ def main(args):
             - ``output_dir`` (Path): Root directory for output files.
             - ``num_clusters`` (int): Number of Gaussian components.
     """
-    # Load and normalise segment embeddings (shape: N × D).
     features, filenames, intervals = load_pooled_features(args.feature_dir)
 
-    # Mirror the feature directory structure under the output root.
     output_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:])
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving partition to {output_dir}")
@@ -52,19 +50,17 @@ def main(args):
 
     gmm_model = GaussianMixture(
         n_components=args.num_clusters,
-        covariance_type="spherical",  # one variance per component, shared across dims
+        covariance_type="spherical",
         max_iter=1000,
         random_state=42,
     )
 
-    # fit_predict runs EM to convergence then returns hard cluster assignments.
     labels = gmm_model.fit_predict(features)
     partition = convert_labels_to_dict(labels)
 
     total_time = time.time() - start_time
     print(f"GMM clustering completed in {total_time:.2f} seconds.")
 
-    # Embed k and timing in the filename for easy comparison across runs.
     partition_path = output_dir / f"gmm_k{args.num_clusters}_{total_time:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")

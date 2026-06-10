@@ -101,8 +101,6 @@ class Quantiser:
         )
 
         if self.collapsed:
-            # Separate output root so collapsed and non-collapsed outputs
-            # never overwrite each other.
             output_dir = (
                 Path("discrete_features_collapsed")
                 / output_dir
@@ -153,7 +151,6 @@ class Quantiser:
         """
         kmeans_path = self.output_dir / f"kmeans_k{self.k}.joblib"
 
-        # Re-use cached model if available.
         if kmeans_path.exists():
             print(f"KMeans model already exists at {kmeans_path}, loading model.")
             self.kmeans = joblib.load(kmeans_path)
@@ -161,11 +158,9 @@ class Quantiser:
 
         feature_files = sorted(self.train_features_dir.rglob("*.npy"))
 
-        # Compute the frame cap from the requested hour limit (50 Hz assumed).
         total_frames = int(self.total_hours * 3600 * 50)
         print(f"Fitting KMeans with {total_frames:,} frame cap.")
 
-        # Accumulate frames until the cap is reached.
         curr_frames = 0
         all_features = []
         for feature_file in tqdm(feature_files, desc="Loading features for KMeans"):
@@ -211,7 +206,6 @@ class Quantiser:
         """
         feature_files = sorted(self.feature_dir.rglob("*.npy"))
 
-        # Pre-load all boundary files into a dict keyed by utterance stem.
         all_boundaries = {}
         for boundary_file in sorted(self.boundary_dir.rglob("*.list")):
             all_boundaries[boundary_file.stem] = np.loadtxt(boundary_file)
@@ -219,7 +213,6 @@ class Quantiser:
         for feature_file in tqdm(feature_files, desc="Transforming features"):
             features = np.load(feature_file)
 
-            # KMeans expects 2-D input; reshape if a 1-D array was saved.
             if features.ndim == 1:
                 features = features.reshape(-1, 1)
                 print(
@@ -227,7 +220,6 @@ class Quantiser:
                     f"1 dimension, reshaping to {features.shape}"
                 )
 
-            # Guard against feature/model dimension mismatches.
             if features.shape[1] != self.kmeans.n_features_in_:
                 print(
                     f"Error: Feature dimension {features.shape[1]} does not "
@@ -236,20 +228,17 @@ class Quantiser:
                 )
                 continue
 
-            # Assign each frame to its nearest centroid.
             quantised = self.kmeans.predict(features)
 
             segment_name = feature_file.stem
             if segment_name in all_boundaries:
                 boundaries = all_boundaries[segment_name]
 
-                # Normalise to a 1-D array regardless of the number of boundaries.
                 if not isinstance(boundaries, np.ndarray):
                     boundaries = np.array(boundaries)
                 if boundaries.ndim == 0:
                     boundaries = np.array([boundaries])
 
-                # Convert boundary timestamps (seconds) to frame indices.
                 boundaries = [seconds_to_frames(b) for b in boundaries]
 
                 start = 0
@@ -260,18 +249,15 @@ class Quantiser:
                         / f"{feature_file.stem}_{start}_{end}.npy"
                     )
 
-                    # Skip already-processed segments (allows resuming).
                     if out_path.exists():
                         start = end
                         continue
 
-                    # Skip degenerate zero-length segments.
                     if end == start:
                         continue
 
                     quantised_segment = quantised[start:end]
 
-                    # Optionally deduplicate consecutive identical units.
                     if self.collapsed:
                         quantised_segment = self.collapse_segment(quantised_segment)
 

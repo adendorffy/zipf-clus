@@ -56,17 +56,14 @@ def main(args):
     embedded in the output partition filename for reproducibility.
     """
 
-    # Load and normalise segment embeddings (shape: N × D).
     features, filenames, intervals = load_pooled_features(args.feature_dir)
 
     start_time = time.time()
 
-    # Mirror the feature directory structure under the output root.
     output_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:])
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving partition to {output_dir}")
 
-    # Temporary directory for caching k-means++ centroids between runs.
     tmp_path = output_dir / "tmp-kmeans"
     tmp_path.mkdir(parents=True, exist_ok=True)
 
@@ -74,9 +71,8 @@ def main(args):
     # Stage 1: k-means++ centroid initialisation
     # ------------------------------------------------------------------
 
-    # Initialise the FAISS k-means object (training happens in Stage 2).
     acoustic_model = faiss.Kmeans(
-        features.shape[1],  # feature dimensionality
+        features.shape[1],
         args.num_clusters,
         niter=15,
         nredo=3,
@@ -89,8 +85,6 @@ def main(args):
     )
 
     if centroid_cache:
-        # Re-use previously computed centroids; recover timing/memory from
-        # the filename so they can be added to the Stage-2 totals.
         tmp_save_path = centroid_cache[0]
         print(f"Loading existing initial centroids from {tmp_save_path}")
         initial_centroids = np.load(tmp_save_path)
@@ -99,11 +93,8 @@ def main(args):
         else:
             centroid_time = tmp_save_path.stem.split("_")[-1]
         print(f"Initial centroids loaded in {centroid_time} seconds with ")
-        # Reset counters so Stage-2 measurement is clean.
         start_time = time.time()
     else:
-        # Sub-sample to at most 3k segments for efficiency; k-means++ on the
-        # full corpus is unnecessary as a small subset already gives good spread.
         subset_size = min(args.num_clusters * 3, features.shape[0])
         subset_idx = np.random.choice(features.shape[0], subset_size, replace=False)
         subset_features = features[subset_idx]
@@ -116,7 +107,6 @@ def main(args):
         centroid_time = time.time() - start_time
         print(f"Initial centroids computed in {centroid_time:.2f} seconds.")
 
-        # Cache centroids with timing in the filename.
         tmp_save_path = (
             tmp_path
             / f"kmeans_initial_centroids{args.num_clusters}_{centroid_time:.2f}.npy"
@@ -132,18 +122,15 @@ def main(args):
     print("Training k-means model with faiss")
     acoustic_model.train(features, init_centroids=initial_centroids)
 
-    # Assign every segment to its nearest centroid.
     _, Index = acoustic_model.index.search(features, 1)
     labels = Index.flatten()
 
     partition = convert_labels_to_dict(labels)
 
-    # Aggregate timing and peak memory across both stages.
     total_time = time.time() - start_time + float(centroid_time)
 
     print(f"K-means clustering completed in {total_time:.2f} seconds.")
 
-    # Embed timing and memory in the filename for easy experiment comparison.
     partition_path = output_dir / f"kmeans_k{args.num_clusters}_{total_time:.2f}.txt"
     write_partition_to_file(partition, filenames, intervals, partition_path)
     print(f"Partition saved to {partition_path}")

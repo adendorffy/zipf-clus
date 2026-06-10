@@ -123,8 +123,6 @@ def set_prior(features, k_0, s_0, covariance_type):
         _, D = features.shape
         mu_0 = np.zeros(D)
 
-        # Estimate per-dimension variance from the data, with a small
-        # epsilon for numerical stability in zero-variance dimensions.
         data_var = np.var(features, axis=0) + 1e-6
         var = data_var * s_0
         var_0 = var / k_0
@@ -167,7 +165,6 @@ def main(args):
     start_time = time.time()
     print("Running FBGMM")
 
-    # Suffix shared across checkpoint and output filenames.
     name_suffix = (
         f"alpha{args.alpha}_KO{args.k_0}_SO{args.s_0}_"
         f"{args.covariance_type}"
@@ -178,7 +175,6 @@ def main(args):
     # Initialisation: resume from checkpoint or create a fresh model
     # ------------------------------------------------------------------
     if args.resume:
-        # Glob for any checkpoint matching the current hyperparameters.
         checkpoint_glob = output_dir / "models" / f"fbgmm_k*_{name_suffix}_*.pkl"
         exists = list(checkpoint_glob.parent.glob(checkpoint_glob.name))
 
@@ -194,14 +190,12 @@ def main(args):
             K_target = checkpoint["K_target"]
         else:
             print("No checkpoint found; starting fresh despite --resume flag.")
-            args.resume = False  # fall through to fresh initialisation below
+            args.resume = False
 
     if not args.resume:
         prior = set_prior(features, args.k_0, args.s_0, args.covariance_type)
         K_target = args.num_clusters if not args.each_in_own else features.shape[0]
 
-        # "each-in-own" places every segment in its own cluster, letting
-        # the model merge during sampling rather than split.
         assignments = "each-in-own" if args.each_in_own else "rand"
 
         fbgmm_model = FBGMM(
@@ -221,7 +215,6 @@ def main(args):
     for i in range(start_iter + 1, start_iter + args.n_iter + 1):
         iter_start = time.time()
 
-        # Run one Gibbs sweep (reassigns every segment in random order).
         fbgmm_model.gibbs_sample(1)
 
         labels = fbgmm_model.components.assignments
@@ -237,9 +230,6 @@ def main(args):
             time=iter_time,
         )
 
-        # Checkpoint after every iteration.  The per-iteration time is
-        # embedded in the filename, so each iteration writes a *new* file —
-        # old checkpoints are not automatically removed.
         checkpoint = {
             "model": fbgmm_model,
             "iteration": i,

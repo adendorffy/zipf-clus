@@ -53,10 +53,8 @@ def main(args):
             - ``threshold`` (float | None): Distance threshold for cutting the
               dendrogram.  If ``None``, fixed-k mode is used.
     """
-    # Load and normalise segment embeddings (shape: N × D).
     features, filenames, intervals = load_pooled_features(args.feature_dir)
 
-    # Mirror the feature directory structure under the output root.
     output_dir = args.output_dir / "/".join(args.feature_dir.parts[-6:])
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving partition to {output_dir}")
@@ -88,7 +86,6 @@ def main(args):
     total_time = time.time() - start_time
     print(f"Agglomerative clustering completed in {total_time:.2f} seconds.")
 
-    # Embed hyperparameters and timing in the filename.
     if args.threshold is not None:
         partition_path = (
             output_dir / f"agglomerative_th{args.threshold}_{args.distance_metric}"

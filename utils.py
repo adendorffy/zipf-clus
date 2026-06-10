@@ -104,8 +104,6 @@ def convert_labels_to_dict(labels):
     ):
         partition_dict[cluster_id].append(node_id)
 
-    # Return clusters as an ordered list (dict preserves insertion order in
-    # Python 3.7+, so the order follows ascending cluster id naturally).
     return list(partition_dict.values())
 
 
@@ -161,13 +159,11 @@ def partition_graph(
         f"{quality_function.__name__}."
     )
 
-    # Adaptive learning-rate schedule for resolution tuning.
     lr = 0.1
     best_diff = float("inf")
     best_partition = None
     patience_counter = 0
 
-    # Initial partition at the supplied resolution.
     partition = la.find_partition(
         graph,
         quality_function,
@@ -177,7 +173,6 @@ def partition_graph(
         max_comm_size=1000,
     )
 
-    # Return immediately if no tuning is requested.
     if max_iterations == 0:
         print(
             f"Initial partitioning done.\n"
@@ -187,7 +182,6 @@ def partition_graph(
         )
         return partition, partition.resolution_parameter
 
-    # Iterative resolution tuning loop.
     for i in range(max_iterations):
         curr_clusters = len(set(partition.membership))
         diff = curr_clusters - num_clusters
@@ -197,13 +191,11 @@ def partition_graph(
             f"clusters={curr_clusters:,}, diff={diff:+d}"
         )
 
-        # Stop early if within the acceptable tolerance band.
         if abs(diff) <= tolerance:
             print(f"Acceptable resolution found. Res: {resolution:.8f}")
             best_partition = partition
             break
 
-        # Track the best partition seen so far.
         if abs(diff) < best_diff:
             best_diff = abs(diff)
             best_partition = partition
@@ -211,18 +203,13 @@ def partition_graph(
         else:
             patience_counter += 1
 
-        # Halve the learning rate if no improvement for `tolerance` steps.
         if patience_counter >= tolerance:
             lr *= 0.5
             patience_counter = 0
 
-        # Compute a signed resolution step proportional to the relative
-        # cluster-count error, clipped to ±2× num_clusters to prevent
-        # runaway steps when the count is far off target.
         diff_clipped = max(min(diff, 2 * num_clusters), -2 * num_clusters)
         step = lr * diff_clipped / num_clusters
 
-        # Update resolution and decay the learning rate.
         resolution = min(max(resolution - step, -10), 10)
         lr *= 0.9
 
