@@ -19,14 +19,7 @@ Unsupervised term discovery involves segmenting unlabelled speech into word- or 
 
 ## Citation
 
-```bibtex
-@article{slabbert2026zipfian,
-  title     = {Recovering the {Zipfian} Distribution in Unsupervised Term Discovery},
-  author    = {Danel Slabbert and Simon Malan and Herman Kamper},
-  journal = {{arXiv} preprint {arXiv}:2606.10781},
-  year      = {2026},
-}
-```
+Removed for openreview.
 
 ---
 
